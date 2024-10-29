@@ -7,8 +7,8 @@ expo接入JPUSH脚本
 `prebuild`为裸工作流 -> 代码注入
 ```
 参考文档：
-- ![JPush 集成 Expo](https://juejin.cn/post/7423235127716659239)
-- ![JPush-expo-config-plugin](https://github.com/RunoMeow/jpush-expo-config-plugin)
+- [JPush 集成 Expo](https://juejin.cn/post/7423235127716659239)
+- [JPush-expo-config-plugin](https://github.com/RunoMeow/jpush-expo-config-plugin)
 
 ## 使用方式
 
@@ -49,5 +49,5 @@ expo prebuild
 这将生成`android`与`ios`文件夹
 
 ## 4.检验
-- `ios`可以参考：![JPush 集成 Expo](https://juejin.cn/post/7423235127716659239)
+- `ios`可以参考：[JPush 集成 Expo](https://juejin.cn/post/7423235127716659239)
 - `android`在`android studio`运行`prebuild`完的文件即可
