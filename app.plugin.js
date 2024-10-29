@@ -4,7 +4,8 @@ const {
   withSettingsGradle,
   withAndroidManifest,
   withAppDelegate,
-  withXcodeProject
+  withPodfile,
+  withInfoPlist,
 } = require('@expo/config-plugins');
 
 let JPUSH_APPKEY = 'appKey',
@@ -15,6 +16,7 @@ const withJPush = (config, props) => {
     throw new Error('[MX_JPush_Expo] 请传入参数 appKey & channel');
   JPUSH_APPKEY = props.appKey;
   JPUSH_CHANNEL = props.channel;
+  config = setInfoPList(config);
   config = setInterface(config);
   config = setAppDelegate(config);
   config = setAndroidManifest(config);
@@ -23,69 +25,101 @@ const withJPush = (config, props) => {
   config = setPodfilePostInstall(config);
   return config;
 };
-const setPodfilePostInstall = (config) =>
-  withXcodeProject(config, (config) => {
+const setInfoPList = config =>
+  withInfoPlist(config, config => {
+    config.modResults.UIBackgroundModes = ['fetch', 'remote-notification'];
+    return config;
+  });
+const setPodfilePostInstall = config =>
+  withPodfile(config, config => {
     const postInstallScript = `
-      installer.pods_project.build_configurations.each do |config|
-        config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"
-      end
-    `
+    installer.pods_project.build_configurations.each do |config|
+      config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"
+    end
+    `;
     const installScript = 'post_install do |installer|';
     const { contents } = config.modResults;
     const installIndex = contents.indexOf(installScript);
 
-    if (installIndex === -1 && contents.indexOf('config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"') === -1) {
+    if (
+      installIndex === -1 &&
+      contents.indexOf(
+        'config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"'
+      ) === -1
+    ) {
       // 如果没有 post_install 且没有 arm64 忽略脚本，则插入
       config.modResults.contents += `
         ${installScript}
         ${postInstallScript}
       `;
-    } else if (installIndex !== -1 && contents.indexOf('config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"') === -1) {
+    } else if (
+      installIndex !== -1 &&
+      contents.indexOf(
+        'config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"'
+      ) === -1
+    ) {
       // 如果有 post_install 但没有 arm64 忽略脚本，则在 post_install 后插入
-      config.modResults.contents = contents.slice(0, installIndex + installScript.length) + postInstallScript + contents.slice(installIndex + installScript.length);
+      config.modResults.contents =
+        contents.slice(0, installIndex + installScript.length) +
+        postInstallScript +
+        contents.slice(installIndex + installScript.length);
     } else {
-      console.log("[MX_JPush_Expo] post_install 脚本已经存在，跳过添加.");
+      console.log('[MX_JPush_Expo] post_install 脚本已经存在，跳过添加.');
     }
     return config;
   });
-const setInterface = (config) => {
-  withAppDelegate(config, (config) => {
-    const implementationIndex = config.modResults.contents.indexOf('@implementation AppDelegate');
+const setInterface = config => {
+  return withAppDelegate(config, config => {
+    const implementationIndex = config.modResults.contents.indexOf(
+      '@implementation AppDelegate'
+    );
 
-    if (implementationIndex !== -1) {
+    if (
+      implementationIndex !== -1 &&
+      config.modResults.contents.indexOf(
+        '@interface AppDelegate ()<JPUSHRegisterDelegate>'
+      ) === -1
+    ) {
       console.log('\n[MX_JPush_Expo] 配置 AppDelegate interface ... ');
       const injectionCode = `
-        @interface AppDelegate () <JPUSHRegisterDelegate>
-        @end
-      `;
+@interface AppDelegate () <JPUSHRegisterDelegate>
+@end
+`;
       // 在 @implementation AppDelegate 前插入代码
-      const updatedData = config.modResults.contents.slice(0, implementationIndex) + injectionCode + config.modResults.contents.slice(implementationIndex);
+      const updatedData =
+        config.modResults.contents.slice(0, implementationIndex) +
+        injectionCode +
+        config.modResults.contents.slice(implementationIndex);
       config.modResults.contents = updatedData;
-    } else {
-      console.log('未找到 @implementation AppDelegate');
     }
+    if (implementationIndex === -1) {
+      console.error('未找到 @implementation AppDelegate');
+    }
+    return config;
   });
 };
 
 // 配置 iOS AppDelegate
-const setAppDelegate = (config) =>
-  withAppDelegate(config, (config) => {
+const setAppDelegate = config =>
+  withAppDelegate(config, config => {
     if (
-      config.modResults.contents.indexOf('#import <UserNotifications/UserNotifications.h>') === -1
+      config.modResults.contents.indexOf(
+        '#import <UserNotifications/UserNotifications.h>'
+      ) === -1
     ) {
       console.log('\n[MX_JPush_Expo] 配置 AppDelegate import ... ');
       config.modResults.contents =
-        `
-        #import <UserNotifications/UserNotifications.h>
-        #import <RCTJPushModule.h>
-        #import <React/RCTBridge.h>
-        #import <React/RCTRootView.h>
-        ` + config.modResults.contents;
+        `#import "AppDelegate.h"
+#import <UserNotifications/UserNotifications.h>
+#import <RCTJPushModule.h>
+#import <React/RCTBridge.h>
+#import <React/RCTRootView.h>
+` + config.modResults.contents;
     }
-    
+
     if (
       config.modResults.contents.indexOf(
-        'JPUSHService setupWithOption:launchOptions'
+        'JPUSHRegisterEntity * entity = [[JPUSHRegisterEntity alloc] init];'
       ) === -1
     ) {
       console.log(
@@ -125,32 +159,40 @@ const setAppDelegate = (config) =>
           didFinishLaunchingWithOptionsStartIndex
         );
     } else {
-      console.log(
-        '\n[JPushExpoConfigPlugin] 配置 AppDelegate appKey & channel ... '
-      );
+      console.log('\n[MX_JPush_Expo] 配置 AppDelegate appKey & channel ... ');
       config.modResults.contents = config.modResults.contents.replace(
         /appKey\:\@\"(.*)\" channel\:\@\"(.*)\" /,
         `appKey:@"${JPUSH_APPKEY}" channel:@"${JPUSH_CHANNEL}" `
       );
-      if (config.modResults.contents.indexOf('return [super application:application didRegisterForRemoteNotificationsWithDeviceToken:deviceToken];') > -1) {
-        config.modResults.contents = config.modResults.contents.replace('return [super application:application didRegisterForRemoteNotificationsWithDeviceToken:deviceToken];', '[JPUSHService registerDeviceToken:deviceToken];')
-      }
-      if (config.modResults.contents.indexOf('return [super application:application didReceiveRemoteNotification:userInfo fetchCompletionHandler:completionHandler];') > -1) {
-        config.modResults.contents = config.modResults.contents.replace('return [super application:application didReceiveRemoteNotification:userInfo fetchCompletionHandler:completionHandler];', `
+    }
+    if (
+      config.modResults.contents.indexOf(
+        'return [super application:application didRegisterForRemoteNotificationsWithDeviceToken:deviceToken];'
+      ) > -1
+    ) {
+      config.modResults.contents = config.modResults.contents.replace(
+        'return [super application:application didRegisterForRemoteNotificationsWithDeviceToken:deviceToken];',
+        '[JPUSHService registerDeviceToken:deviceToken];'
+      );
+    }
+    if (
+      config.modResults.contents.indexOf(
+        'return [super application:application didReceiveRemoteNotification:userInfo fetchCompletionHandler:completionHandler];'
+      ) > -1
+    ) {
+      config.modResults.contents = config.modResults.contents.replace(
+        'return [super application:application didReceiveRemoteNotification:userInfo fetchCompletionHandler:completionHandler];',
+        `
         // iOS 10 以下 Required
         NSLog(@"iOS 7 APNS");
         [JPUSHService handleRemoteNotification:userInfo];
         [[NSNotificationCenter defaultCenter] postNotificationName:J_APNS_NOTIFICATION_ARRIVED_EVENT object:userInfo];
         completionHandler(UIBackgroundFetchResultNewData);
-        `)
-      }
+        `
+      );
     }
-    if (
-      config.modResults.contents.indexOf(
-        'JPush start'
-      ) === -1
-    ) {
-      console.log('\n[JPushExpoConfigPlugin] 配置 AppDelegate other ... ');
+    if (config.modResults.contents.indexOf('JPush start') === -1) {
+      console.log('\n[MX_JPush_Expo] 配置 AppDelegate other ... ');
       config.modResults.contents = config.modResults.contents.replace(
         /\@end([\n]*)$/,
         `//************************************************JPush start************************************************
@@ -194,7 +236,8 @@ const setAppDelegate = (config) =>
 
 // 自定义消息
 - (void)networkDidReceiveMessage:(NSNotification *)notification {
-  [[NSNotificationCenter defaultCenter] postNotificationName:J_CUSTOM_NOTIFICATION_EVENT object:[notification userInfo]];
+  NSDictionary * userInfo = [notification userInfo];
+  [[NSNotificationCenter defaultCenter] postNotificationName:J_CUSTOM_NOTIFICATION_EVENT object:userInfo];
 }
 
 //************************************************JPush end************************************************
@@ -208,17 +251,15 @@ const setAppDelegate = (config) =>
   });
 
 // 配置 Android AndroidManifest
-const setAndroidManifest = (config) =>
-  withAndroidManifest(config, (config) => {
+const setAndroidManifest = config =>
+  withAndroidManifest(config, config => {
     if (
       AndroidConfig.Manifest.findMetaDataItem(
         config.modResults.manifest.application[0],
         'JPUSH_CHANNEL'
       ) === -1
     ) {
-      console.log(
-        '\n[JPushExpoConfigPlugin] 配置 AndroidManifest JPUSH_CHANNEL ... '
-      );
+      console.log('\n[MX_JPush_Expo] 配置 AndroidManifest JPUSH_CHANNEL ... ');
       AndroidConfig.Manifest.addMetaDataItemToMainApplication(
         config.modResults.manifest.application[0],
         'JPUSH_CHANNEL',
@@ -231,72 +272,19 @@ const setAndroidManifest = (config) =>
         'JPUSH_APPKEY'
       ) === -1
     ) {
-      console.log(
-        '\n[JPushExpoConfigPlugin] 配置 AndroidManifest JPUSH_APPKEY ... '
-      );
+      console.log('\n[MX_JPush_Expo] 配置 AndroidManifest JPUSH_APPKEY ... ');
       AndroidConfig.Manifest.addMetaDataItemToMainApplication(
         config.modResults.manifest.application[0],
         'JPUSH_APPKEY',
         '${JPUSH_APPKEY}'
       );
     }
-    if (
-      config.modResults.manifest.application[0].activity.findIndex(
-        (item) =>
-          item.$['android:name'] === 'cn.jpush.android.service.JNotifyActivity'
-      ) === -1
-    ) {
-      console.log(
-        '\n[JPushExpoConfigPlugin] 此后两项为BUG修复, 对应版本 jpush-react-native 2.8.3'
-      );
-      console.log(
-        '\n[JPushExpoConfigPlugin] - 配置 AndroidManifest xmlns:tools ... '
-      );
-      config.modResults.manifest.$['xmlns:tools'] =
-        'http://schemas.android.com/tools';
-      console.log(
-        '\n[JPushExpoConfigPlugin] - 配置 AndroidManifest activity ... '
-      );
-      config.modResults.manifest.application[0].activity.push({
-        $: {
-          'android:name': 'cn.jpush.android.service.JNotifyActivity',
-          'android:exported': 'true',
-          'tools:node': 'replace',
-          'android:taskAffinity': 'jpush.custom',
-          'android:theme': '@android:style/Theme.Translucent.NoTitleBar',
-        },
-        'intent-filter': [
-          {
-            action: [
-              {
-                $: {
-                  'android:name': 'cn.jpush.android.intent.JNotifyActivity',
-                },
-              },
-            ],
-            category: [
-              {
-                $: {
-                  'android:name': 'android.intent.category.DEFAULT',
-                },
-              },
-              {
-                $: {
-                  'android:name': '${applicationId}',
-                },
-              },
-            ],
-          },
-        ],
-      });
-    }
-
     return config;
   });
 
 // 配置 Android build.gradle
-const setAppBuildGradle = (config) =>
-  withAppBuildGradle(config, (config) => {
+const setAppBuildGradle = config =>
+  withAppBuildGradle(config, config => {
     const defaultConfig = config.modResults.contents.match(
       /defaultConfig([\s\S]*)versionName(.*)\n/
     );
@@ -305,9 +293,7 @@ const setAppBuildGradle = (config) =>
       const startStringLength = startString.length;
       const startStringIndex =
         config.modResults.contents.indexOf(startString) + startStringLength;
-      console.log(
-        '\n[JPushExpoConfigPlugin] 配置 build.gradle appKey & channel ... '
-      );
+      console.log('\n[MX_JPush_Expo] 配置 build.gradle appKey & channel ... ');
       if (config.modResults.contents.indexOf('JPUSH_APPKEY') === -1) {
         config.modResults.contents =
           config.modResults.contents.slice(0, startStringIndex) +
@@ -327,7 +313,7 @@ const setAppBuildGradle = (config) =>
       }
     } else
       throw new Error(
-        '[JPushExpoConfigPlugin] 无法完成 build.gradle - defaultConfig 配置'
+        '[MX_JPush_Expo] 无法完成 build.gradle - defaultConfig 配置'
       );
     const dependencies = config.modResults.contents.match(/dependencies {\n/);
     if (dependencies) {
@@ -341,7 +327,7 @@ const setAppBuildGradle = (config) =>
         ) === -1
       ) {
         console.log(
-          '\n[JPushExpoConfigPlugin] 配置 build.gradle dependencies jpush-react-native ... '
+          '\n[MX_JPush_Expo] 配置 build.gradle dependencies jpush-react-native ... '
         );
         config.modResults.contents =
           config.modResults.contents.slice(0, startStringIndex) +
@@ -354,7 +340,7 @@ const setAppBuildGradle = (config) =>
         ) === -1
       ) {
         console.log(
-          '\n[JPushExpoConfigPlugin] 配置 build.gradle dependencies jcore-react-native ... '
+          '\n[MX_JPush_Expo] 配置 build.gradle dependencies jcore-react-native ... '
         );
         config.modResults.contents =
           config.modResults.contents.slice(0, startStringIndex) +
@@ -363,20 +349,20 @@ const setAppBuildGradle = (config) =>
       }
     } else
       throw new Error(
-        '[JPushExpoConfigPlugin] 无法完成 build.gradle dependencies 配置'
+        '[MX_JPush_Expo] 无法完成 build.gradle dependencies 配置'
       );
 
     return config;
   });
 
 // 配置 Android settings.gradle
-const setSettingsGradle = (config) =>
-  withSettingsGradle(config, (config) => {
+const setSettingsGradle = config =>
+  withSettingsGradle(config, config => {
     if (
       config.modResults.contents.indexOf(`include ':jpush-react-native'`) === -1
     ) {
       console.log(
-        '\n[JPushExpoConfigPlugin] 配置 settings.gradle include jpush-react-native ... '
+        '\n[MX_JPush_Expo] 配置 settings.gradle include jpush-react-native ... '
       );
       config.modResults.contents =
         config.modResults.contents +
@@ -388,7 +374,7 @@ project(':jpush-react-native').projectDir = new File(rootProject.projectDir, '..
       config.modResults.contents.indexOf(`include ':jcore-react-native'`) === -1
     ) {
       console.log(
-        '\n[JPushExpoConfigPlugin] 配置 settings.gradle include jcore-react-native ... '
+        '\n[MX_JPush_Expo] 配置 settings.gradle include jcore-react-native ... '
       );
       config.modResults.contents =
         config.modResults.contents +
