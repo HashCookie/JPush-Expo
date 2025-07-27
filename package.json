@@ -1,11 +1,11 @@
 {
   "name": "coki-jpush-expo",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "expo 集成 jpush 一体化方案",
   "main": "index.js",
   "repository": {
     "type": "git",
-    "url": "https://github.com/konodioda727/JPush-Expo"
+    "url": "git+https://github.com/HashCookie/coki-jpush-expo"
   },
   "keywords": [
     "jpush",
