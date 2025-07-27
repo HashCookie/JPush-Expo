@@ -1,4 +1,4 @@
-# MX-JPUSH-Expo
+# coki-jpush-expo
 expo接入JPUSH脚本
 
 ## 工作原理
@@ -15,7 +15,7 @@ expo接入JPUSH脚本
 ### 1.下载
 - 插件下载：
 ```bash
-npm i mx-jpush-expo
+npm i coki-jpush-expo
 ```
 - `jpush`依赖包 `jpush-react-native` 和 `jpush-core` 下载
 ```bash
@@ -31,7 +31,7 @@ npm install jpush-react-native jcore-react-native --save
     "plugins": [
       [
         // ...
-        "mx-jpush-expo",
+        "coki-jpush-expo",
         {
           "appKey": "你的极光推送AppKey",
           "channel": "你的极光推送Channel"

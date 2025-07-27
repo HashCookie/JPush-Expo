@@ -4,9 +4,11 @@ const {
   withSettingsGradle,
   withAndroidManifest,
   withAppDelegate,
-  withPodfile,
+  withDangerousMod,
   withInfoPlist,
 } = require('@expo/config-plugins');
+const fs = require('fs');
+const path = require('path');
 
 let JPUSH_APPKEY = 'appKey',
   JPUSH_CHANNEL = 'channel';
@@ -31,43 +33,58 @@ const setInfoPList = config =>
     return config;
   });
 const setPodfilePostInstall = config =>
-  withPodfile(config, config => {
-    const postInstallScript = `
+  withDangerousMod(config, [
+    'ios',
+    async (config) => {
+      const podfilePath = path.join(config.modRequest.platformProjectRoot, 'Podfile');
+      
+      if (fs.existsSync(podfilePath)) {
+        console.log('\n[MX_JPush_Expo] 使用 withDangerousMod 配置 Podfile...');
+        let contents = fs.readFileSync(podfilePath, 'utf8');
+        
+        const postInstallScript = `
     installer.pods_project.build_configurations.each do |config|
       config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"
     end
     `;
-    const installScript = 'post_install do |installer|';
-    const { contents } = config.modResults;
-    const installIndex = contents.indexOf(installScript);
+        const installScript = 'post_install do |installer|';
+        const installIndex = contents.indexOf(installScript);
 
-    if (
-      installIndex === -1 &&
-      contents.indexOf(
-        'config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"'
-      ) === -1
-    ) {
-      // 如果没有 post_install 且没有 arm64 忽略脚本，则插入
-      config.modResults.contents += `
-        ${installScript}
-        ${postInstallScript}
-      `;
-    } else if (
-      installIndex !== -1 &&
-      contents.indexOf(
-        'config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"'
-      ) === -1
-    ) {
-      // 如果有 post_install 但没有 arm64 忽略脚本，则在 post_install 后插入
-      config.modResults.contents =
-        contents.slice(0, installIndex + installScript.length) +
-        postInstallScript +
-        contents.slice(installIndex + installScript.length);
-    } else {
-      console.log('[MX_JPush_Expo] post_install 脚本已经存在，跳过添加.');
-    }
-    return config;
-  });
+        if (
+          installIndex === -1 &&
+          contents.indexOf(
+            'config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"'
+          ) === -1
+        ) {
+          // 如果没有 post_install 且没有 arm64 忽略脚本，则插入
+          contents += `
+${installScript}
+${postInstallScript}
+end
+`;
+        } else if (
+          installIndex !== -1 &&
+          contents.indexOf(
+            'config.build_settings["EXCLUDED_ARCHS[sdk=iphonesimulator*]"] = "arm64"'
+          ) === -1
+        ) {
+          // 如果有 post_install 但没有 arm64 忽略脚本，则在 post_install 后插入
+          contents =
+            contents.slice(0, installIndex + installScript.length) +
+            postInstallScript +
+            contents.slice(installIndex + installScript.length);
+        } else {
+          console.log('[MX_JPush_Expo] post_install 脚本已经存在，跳过添加.');
+        }
+
+        fs.writeFileSync(podfilePath, contents);
+      } else {
+        console.warn(`[MX_JPush_Expo] Podfile 文件不存在: ${podfilePath}`);
+      }
+
+      return config;
+    },
+  ]);
 const setInterface = config => {
   return withAppDelegate(config, config => {
     const implementationIndex = config.modResults.contents.indexOf(
